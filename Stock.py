@@ -1,14 +1,16 @@
 # -*- coding: utf-8 -*-
-import re
-import sys
+from re import findall
+from sys import argv, exit
 from traceback import print_exc
 
-import requests
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QTableWidget,
-                             QTableWidgetItem)
+from PyQt5.QtCore import QEvent, QRegExp, Qt
+from PyQt5.QtGui import QFont, QPalette, QRegExpValidator
+from PyQt5.QtWidgets import (QAbstractItemView, QApplication, QHeaderView,
+                             QMainWindow, QTableWidget, QTableWidgetItem)
+from requests import codes, post
 
-import thread_return as thread
 from Stock_GUI import Ui_MainWindow
+from thread_return import ThreadWithReturnValue
 
 
 def str2obj(s, s1=';', s2='='):
@@ -58,16 +60,22 @@ def Web_scraping(date, ID):
         url = "https://www.tdcc.com.tw/smWeb/QryStockAjax.do"
         data = {'scaDates': date, 'scaDate': date, 'SqlMethod': 'StockNo', 'tockNo': ID, 'radioStockNo': ID,
                 'StockName': '', 'REQ_OPR': 'SELECT', 'clkStockNo': ID, 'clkStockName': ''}
-        html = requests.post(url, params=data)
-        if html.status_code == requests.codes.ok:
-            pattern = r'<td align=\"center\">.+</td>\s+<td align=\"right\">.+</td>\s+<td align=\"right\">.+</td>\s+<td align=\"right\">.+</td>'
-            list_table = re.findall(pattern, html.text)
+        html = post(url, params=data)
+        if html.status_code != codes['ok']:
+            raise ValueError(f'{html.status_code}')
         else:
-            raise ValueError
+            pattern = r'<td align=\"center\">.+</td>\s+<td align=\"right\">.+</td>\s+<td align=\"right\">.+</td>\s+<td align=\"right\">.+</td>'
+            list_table = findall(pattern, html.text)
+            if not list_table:
+                html = post(url, params=data)
+                list_table = findall(pattern, html.text)
+                if not list_table:
+                    return []
 
-        stock_li = list(map(lambda x: re.findall(r'>(.*)<', x), list_table))
-    except ValueError:
-        print('html.status_code error')
+        stock_li = list(map(lambda x: findall(r'>(.*)<', x), list_table))
+    except ValueError as error_message:
+        print(str(error_message))
+        return []
     except:
         print_exc
     return stock_li
@@ -78,30 +86,39 @@ class MainWindow(QMainWindow, Ui_MainWindow):
     def __init__(self, parent=None):
         super(MainWindow, self).__init__(parent)
         self.setupUi(self)
+
         self.func_load_Date()
         self.comboBox.activated[str].connect(self.func_change_start)
         self.comboBox_2.activated[str].connect(self.func_change_end)
+
+        regular_pattern = QRegExp('[A-Z0-9]+')
+        line_Vaildator = QRegExpValidator(self)
+        line_Vaildator.setRegExp(regular_pattern)
+        self.lineEdit.setValidator(line_Vaildator)
+
+        self.lineEdit_2.setAlignment(Qt.AlignCenter)
+        self.lineEdit_2.setFont(
+            QFont("Times", 14, QFont.Bold, QFont.StyleItalic))
+        self.line2_palette = QPalette()
+        self.line2_palette.setColor(QPalette.Text, Qt.red)
+
+        self.tableWidget.setEditTriggers(QAbstractItemView.NoEditTriggers)
 
     def button(self):
 
         try:
             Stock_number = self.lineEdit.text()
-            if not Stock_number:
-                raise ValueError("股票號碼不可為空")
-            elif not Stock_number.isdigit():
-                raise ValueError("股票號碼必須是數字")
-        except ValueError as e:
-            self.lineEdit_2.setText(str(e))
-        else:
-            thread_1 = thread.ThreadWithReturnValue(
-                target=Web_scraping, args=(self.val_end_date, Stock_number))
-            thread_2 = thread.ThreadWithReturnValue(
-                target=Web_scraping, args=(self.val_start_date, Stock_number))
+            thread_1 = ThreadWithReturnValue(target=Web_scraping, args=(
+                self.val_end_date, Stock_number))
+            thread_2 = ThreadWithReturnValue(target=Web_scraping, args=(
+                self.val_start_date, Stock_number))
             thread_1.start()
             thread_2.start()
             stock_li1 = thread_1.join()
             stock_li2 = thread_2.join()
 
+            if not stock_li1 or not stock_li2:
+                raise ValueError('請重按一次')
             final = Calculate_stock(stock_li1, stock_li2)
 
             self.tableWidget.setColumnCount(4)
@@ -109,7 +126,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             horizontalHeader = ["持股/單位數分級", "人數", "股數/單位數", "佔集保庫存數比例 (%)"]
             self.tableWidget.setHorizontalHeaderLabels(horizontalHeader)
             self.lineEdit_2.setText(
-                f'證券代號: {Stock_number} 起始日期:{self.val_start_date} 終止日期:{self.val_end_date}')
+                f'證券代號: {Stock_number}    起始日期: {self.val_start_date}    終止日期: {self.val_end_date}')
 
             count = 0
             for i in final:
@@ -119,8 +136,14 @@ class MainWindow(QMainWindow, Ui_MainWindow):
                 self.tableWidget.setItem(count, 3, QTableWidgetItem(i[3]))
                 count += 1
 
-            self.tableWidget.resizeColumnsToContents()
-            self.tableWidget.resizeRowsToContents()
+            self.tableWidget.verticalHeader().setSectionResizeMode(QHeaderView.Stretch)
+            self.tableWidget.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+            self.tableWidget.horizontalHeader().setSectionResizeMode(2,
+                                                                     QHeaderView.ResizeToContents)
+
+        except ValueError as e:
+            self.lineEdit_2.setPalette(self.line2_palette)
+            self.lineEdit_2.setText(str(e))
 
     def func_load_Date(self):
 
@@ -128,9 +151,9 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         headers = str2obj(headers, '\n', ': ')
         params = {'REQ_OPR': 'qrySelScaDates'}
         url = "https://www.tdcc.com.tw/smWeb/QryStockAjax.do"
-        date = requests.post(url, params=params, headers=headers)
-        if date.status_code == requests.codes.ok:
-            date_li = re.findall(r'\d+', date.text)
+        date = post(url, params=params, headers=headers)
+        if date.status_code == codes.ok:
+            date_li = findall(r'\d+', date.text)
             self.comboBox.addItems(date_li)
             self.comboBox_2.addItems(date_li)
             self.val_start_date = self.val_end_date = date_li[0]
@@ -143,13 +166,17 @@ class MainWindow(QMainWindow, Ui_MainWindow):
     def func_change_end(self, text):
         self.val_end_date = text
 
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key_Enter, Qt.Key_Return):
+            self.button()
+
 
 if __name__ == "__main__":
 
     try:
-        app = QApplication(sys.argv)
+        app = QApplication(argv)
         window = MainWindow()
         window.show()
-        sys.exit(app.exec_())
+        exit(app.exec_())
     except:
         print_exc
