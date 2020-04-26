@@ -4,23 +4,14 @@ from sys import argv, exit
 from traceback import print_exc
 
 from PyQt5.QtCore import QEvent, QRegExp, Qt
-from PyQt5.QtGui import QFont, QPalette, QRegExpValidator
+from PyQt5.QtGui import QFont, QKeySequence, QPalette, QRegExpValidator
 from PyQt5.QtWidgets import (QAbstractItemView, QApplication, QHeaderView,
-                             QMainWindow, QTableWidget, QTableWidgetItem)
+                             QMainWindow, QShortcut, QTableWidget,
+                             QTableWidgetItem)
 from requests import codes, post
 
 from Stock_GUI import Ui_MainWindow
 from thread_return import ThreadWithReturnValue
-
-
-def str2obj(s, s1=';', s2='='):
-    li = s.split(s1)
-    res = {}
-    for kv in li:
-        li2 = kv.split(s2)
-        if len(li2) > 1:
-            res[li2[0]] = li2[1]
-    return res
 
 
 def Calculate_stock(li1, li2):
@@ -57,28 +48,37 @@ def Calculate_stock(li1, li2):
 
 def Web_scraping(date, ID):
     try:
+        # post requests parameter
         url = "https://www.tdcc.com.tw/smWeb/QryStockAjax.do"
-        data = {'scaDates': date, 'scaDate': date, 'SqlMethod': 'StockNo', 'tockNo': ID, 'radioStockNo': ID,
-                'StockName': '', 'REQ_OPR': 'SELECT', 'clkStockNo': ID, 'clkStockName': ''}
-        html = post(url, params=data)
-        if html.status_code != codes['ok']:
-            raise ValueError(f'{html.status_code}')
-        else:
-            pattern = r'<td align=\"center\">.+</td>\s+<td align=\"right\">.+</td>\s+<td align=\"right\">.+</td>\s+<td align=\"right\">.+</td>'
-            list_table = findall(pattern, html.text)
-            if not list_table:
-                html = post(url, params=data)
+        data = {
+            'scaDates': date, 'scaDate': date, 'SqlMethod': 'StockNo', 'tockNo': ID, 'radioStockNo': ID,
+            'StockName': '', 'REQ_OPR': 'SELECT', 'clkStockNo': ID, 'clkStockName': ''
+        }
+        header = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+        }
+
+        for i in range(3):
+            # Web scrapting. Fetching the stock information.
+            html = post(url, params=data, headers=header)
+            if html.status_code != codes['ok']:
+                stock_li = []
+                raise ValueError(f'error code:{html.status_code}')
+            else:
+                # using regular expression re.findall capture the <td>
+                pattern = r'<td align="center">(.*)</td>\s+<td align="right">(.*)</td>\s+<td align="right">(.*)</td>\s+<td align="right">(.*)</td>\s+'
                 list_table = findall(pattern, html.text)
                 if not list_table:
-                    return []
+                    continue
+                break
 
-        stock_li = list(map(lambda x: findall(r'>(.*)<', x), list_table))
+        stock_li = list(map(lambda x: list(x), list_table))
     except ValueError as error_message:
         print(str(error_message))
-        return []
     except:
-        print_exc
-    return stock_li
+        print_exc()
+    finally:
+        return stock_li
 
 
 class MainWindow(QMainWindow, Ui_MainWindow):
@@ -103,8 +103,9 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self.line2_palette.setColor(QPalette.Text, Qt.red)
 
         self.tableWidget.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        QShortcut(QKeySequence("Enter"), self, self.padding_stock)
 
-    def button(self):
+    def padding_stock(self):
 
         try:
             Stock_number = self.lineEdit.text()
@@ -126,7 +127,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             horizontalHeader = ["持股/單位數分級", "人數", "股數/單位數", "佔集保庫存數比例 (%)"]
             self.tableWidget.setHorizontalHeaderLabels(horizontalHeader)
             self.lineEdit_2.setText(
-                f'證券代號: {Stock_number}    起始日期: {self.val_start_date}    終止日期: {self.val_end_date}')
+                f'證券代號: {Stock_number}{" "*4}起始日期: {self.val_start_date}{" "*4}終止日期: {self.val_end_date}')
 
             count = 0
             for i in final:
@@ -145,13 +146,17 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             self.lineEdit_2.setPalette(self.line2_palette)
             self.lineEdit_2.setText(str(e))
 
+    # Web scrapting. Fetching the Date. Padding to the Drop-down menu
     def func_load_Date(self):
 
-        headers = '''POST /smWeb/QryStockAjax.do HTTP/1.1\nHost: www.tdcc.com.tw\nConnection: keep-alive\nAccept: application/json, text/javascript, */*; q=0.01\nSec-Fetch-Dest: empty\nX-Requested-With: XMLHttpRequest\nUser-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.106 Safari/537.36\nContent-Type: application/x-www-form-urlencoded;charset=UTF-8\nOrigin: https://www.tdcc.com.tw\nSec-Fetch-Site: same-origin\nSec-Fetch-Mode: cors\nReferer: https://www.tdcc.com.tw/smWeb/QryStock.jsp\nAccept-Encoding: gzip, deflate, br\nAccept-Language: zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7,zh-CN;q=0.6,ja;q=0.5\n'''
-        headers = str2obj(headers, '\n', ': ')
-        params = {'REQ_OPR': 'qrySelScaDates'}
         url = "https://www.tdcc.com.tw/smWeb/QryStockAjax.do"
-        date = post(url, params=params, headers=headers)
+        params = {
+            'REQ_OPR': 'qrySelScaDates'
+        }
+        header = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+        }
+        date = post(url, params=params, headers=header)
         if date.status_code == codes.ok:
             date_li = findall(r'\d+', date.text)
             self.comboBox.addItems(date_li)
@@ -179,4 +184,4 @@ if __name__ == "__main__":
         window.show()
         exit(app.exec_())
     except:
-        print_exc
+        print_exc()
