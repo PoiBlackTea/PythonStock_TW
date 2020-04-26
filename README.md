@@ -1,6 +1,3 @@
-# PythonStock_TW
-
-----
 ## Python股票小程式
 
 > 功能: 計算集保戶股票分散差距
