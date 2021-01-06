@@ -10,7 +10,7 @@ from PyQt5.QtWidgets import (QAbstractItemView, QApplication, QHeaderView,
                              QTableWidgetItem)
 from requests import codes, post
 
-from Stock_GUI import Ui_MainWindow
+from GUI import Ui_MainWindow
 from thread_return import ThreadWithReturnValue
 
 
