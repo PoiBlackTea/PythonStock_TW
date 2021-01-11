@@ -1,4 +1,8 @@
 # -*- coding: utf-8 -*-
+from collections import namedtuple
+from thread_return import ThreadWithReturnValue
+from GUI import Ui_MainWindow
+from requests import codes, post
 from re import findall
 from sys import argv, exit
 from traceback import print_exc
@@ -8,82 +12,99 @@ from PyQt5.QtGui import QFont, QKeySequence, QPalette, QRegExpValidator
 from PyQt5.QtWidgets import (QAbstractItemView, QApplication, QHeaderView,
                              QMainWindow, QShortcut, QTableWidget,
                              QTableWidgetItem)
-from requests import codes, post
-
-from GUI import Ui_MainWindow
-from thread_return import ThreadWithReturnValue
 
 
-def Calculate_stock(li1, li2):
+class stock:
 
-    ar0 = []
-    if len(li1) == 17 and len(li2) != 17:
-        li1[15][0:2] = ['差異數調整', '0']
-        li2.insert(15, ['差異數調整', '0', '0', '0.00'])
-    elif len(li2) == 17 and len(li1) != 17:
-        li2[15][0:2] = ['差異數調整', '0']
-        li1.insert(15, ['差異數調整', '0', '0', '0.00'])
-    elif len(li2) == 17 and len(li1) == 17:
-        li1[15][0:2] = ['差異數調整', '0']
-        li2[15][0:2] = ['差異數調整', '0']
-    table_length = len(li1)
+    def __init__(self, date, securities_code) -> None:
+        self._date = date
+        self._securities_code = securities_code
+        self._集保戶股權分散表 = self._construct()
 
-    for i in range(table_length):
-        ar1 = []
-        for j in range(4):
-            if j == 0:
-                tmp = li1[i][j]
-            elif j == 1 or j == 2:
-                tmp = str(int(li1[i][j].replace(',', '')) -
-                          int(li2[i][j].replace(',', '')))
-                tmp = f'{int(tmp):,} ({li2[i][j]}->{li1[i][j]})'
-            else:
-                tmp = str(round(float(li1[i][j]) - float(li2[i][j]), 2))
-                tmp = f'{float(tmp)} ({li2[i][j]}->{li1[i][j]})'
-            ar1.append(tmp)
-        ar0.append(ar1)
+    def __len__(self) -> int:
+        return len(self._集保戶股權分散表)
 
-    return ar0
+    def __getitem__(self, securities_holding_range) -> str:
+        return self._集保戶股權分散表[securities_holding_range]
 
+    def __bool__(self) -> bool:
+        return bool(self._集保戶股權分散表)
 
-def Web_scraping(date, ID):
-    try:
-        # post requests parameter
+    def __repr__(self) -> str:
+        return f'集保戶股權分散表 資料日期:{self._date} 證券代號:{self._securities_code}'
+
+    def _construct(self) -> list:
+
         url = "https://www.tdcc.com.tw/smWeb/QryStockAjax.do"
-        data = {
-            'scaDates': date, 'scaDate': date, 'SqlMethod': 'StockNo', 'tockNo': ID, 'radioStockNo': ID,
-            'StockName': '', 'REQ_OPR': 'SELECT', 'clkStockNo': ID, 'clkStockName': ''
+        form_data = {
+            'scaDates': self._date,
+            'scaDate': self._date,
+            'tockNo': self._securities_code,
+            'radioStockNo': self._securities_code,
+            'clkStockNo': self._securities_code,
+            'SqlMethod': 'StockNo',
+            'REQ_OPR': 'SELECT',
+            'StockName': '',
+            'clkStockName': ''
         }
         header = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
         }
 
-        for i in range(3):
-            # Web scrapting. Fetching the stock information.
-            html = post(url, params=data, headers=header)
-            if html.status_code != codes['ok']:
-                stock_li = []
-                raise ValueError(f'error code:{html.status_code}')
-            else:
-                # using regular expression re.findall capture the <td>
-                pattern = r'<td align="center">(.*)</td>\s+<td align="right">(.*)</td>\s+<td align="right">(.*)</td>\s+<td align="right">(.*)</td>\s+'
-                list_table = findall(pattern, html.text)
-                if not list_table:
-                    continue
-                break
+        html = post(url, params=form_data, headers=header)
+        pattern = r'<td align="center">(.*)</td>\s+<td align="right">(.*)</td>\s+<td align="right">(.*)</td>\s+<td align="right">(.*)</td>\s+'
+        list_table = findall(pattern, html.text)
 
-        stock_li = list(map(lambda x: list(x), list_table))
-    except ValueError as error_message:
-        print(str(error_message))
-    except:
-        print_exc()
-    finally:
-        return stock_li
+        return list_table
+
+
+def deviation_from_stock(stock_1, stock_2) -> list:
+
+    first_part_table = [(
+        i[0],
+        f"{int(i[1].replace(',',''))-int(j[1].replace(',','')):,} ({i[1]}->{j[1]})",
+        f"{int(i[2].replace(',',''))-int(j[2].replace(',','')):,} ({i[2]}->{j[2]})",
+        f"{round(float(i[3])-float(j[3]),2)}  ({i[3]}->{j[3]})"
+    ) for i, j in zip(stock_1[0:15], stock_2[0:15])
+    ]
+
+    length_of_stock_1, length_of_stock_2 = len(stock_1), len(stock_2)
+    if length_of_stock_1 == 17 and length_of_stock_2 != 17:
+        second_part_table = [(
+            '差異數調整',
+            '0',
+            f"{stock_1[15][2]} ({stock_1[15][2]}->0)",
+            f"{stock_1[15][3]}  ({stock_1[15][3]}->0.00)"
+        )]
+    elif length_of_stock_1 != 17 and length_of_stock_2 == 17:
+        second_part_table = [(
+            '差異數調整',
+            '0',
+            f"-{stock_2[15][2]} (0->{stock_2[15][2]})",
+            f"{stock_2[15][3]}  (0.00->{stock_2[15][3]})"
+        )]
+    elif length_of_stock_2 == 17 and length_of_stock_2 == 17:
+        second_part_table = [(
+            '差異數調整',
+            '0',
+            f"{int(stock_1[15][2].replace(',',''))-int(stock_2[15][2].replace(',','')):,} ({stock_1[15][2]}->{stock_2[15][2]})",
+            f"{round(float(stock_1[15][3])-float(stock_2[15][3]),2)}  ({stock_1[15][3]}->{stock_2[15][3]})"
+        )]
+    else:
+        second_part_table = []
+
+    last_part_table = [(
+        f"{stock_1[-1][0]}",
+        f"{int(stock_1[-1][1].replace(',',''))-int(stock_2[-1][1].replace(',','')):,} ({stock_1[-1][1]}->{stock_2[-1][1]})",
+        f"{int(stock_1[-1][2].replace(',',''))-int(stock_2[-1][2].replace(',','')):,} ({stock_1[-1][2]}->{stock_2[-1][2]})",
+        f"{round(float(stock_1[-1][3])-float(stock_2[-1][3]),2)}  ({stock_1[-1][3]}->{stock_2[-1][3]})"
+    )]
+    return first_part_table+second_part_table+last_part_table
 
 
 class MainWindow(QMainWindow, Ui_MainWindow):
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None) -> None:
         super(MainWindow, self).__init__(parent)
         self.setupUi(self)
 
@@ -91,7 +112,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self.comboBox.activated[str].connect(self.func_change_start)
         self.comboBox_2.activated[str].connect(self.func_change_end)
 
-        regular_pattern = QRegExp('[A-Z0-9]+')
+        regular_pattern = QRegExp('[\w]+')
         line_Vaildator = QRegExpValidator(self)
         line_Vaildator.setRegExp(regular_pattern)
         self.lineEdit.setValidator(line_Vaildator)
@@ -103,24 +124,25 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self.line2_palette.setColor(QPalette.Text, Qt.red)
 
         self.tableWidget.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        QShortcut(QKeySequence("Enter"), self, self.padding_stock)
+        QShortcut(QKeySequence("Enter"), self, self.button)
 
-    def padding_stock(self):
+    def button(self) -> None:
 
         try:
             Stock_number = self.lineEdit.text()
-            thread_1 = ThreadWithReturnValue(target=Web_scraping, args=(
+            thread_1 = ThreadWithReturnValue(target=stock, args=(
                 self.val_end_date, Stock_number))
-            thread_2 = ThreadWithReturnValue(target=Web_scraping, args=(
+            thread_2 = ThreadWithReturnValue(target=stock, args=(
                 self.val_start_date, Stock_number))
             thread_1.start()
             thread_2.start()
-            stock_li1 = thread_1.join()
-            stock_li2 = thread_2.join()
+            end_date_stock_statistics = thread_1.join()
+            start_date_stock_statistics = thread_2.join()
 
-            if not stock_li1 or not stock_li2:
+            if not end_date_stock_statistics or not start_date_stock_statistics:
                 raise ValueError('請重按一次')
-            final = Calculate_stock(stock_li1, stock_li2)
+            final = deviation_from_stock(
+                end_date_stock_statistics, start_date_stock_statistics)
 
             self.tableWidget.setColumnCount(4)
             self.tableWidget.setRowCount(len(final))
@@ -147,7 +169,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             self.lineEdit_2.setText(str(e))
 
     # Web scrapting. Fetching the Date. Padding to the Drop-down menu
-    def func_load_Date(self):
+    def func_load_Date(self) -> None:
 
         url = "https://www.tdcc.com.tw/smWeb/QryStockAjax.do"
         params = {
@@ -165,13 +187,13 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         else:
             self.lineEdit_2.setText('Loading Date Fail')
 
-    def func_change_start(self, text):
+    def func_change_start(self, text) -> None:
         self.val_start_date = text
 
-    def func_change_end(self, text):
+    def func_change_end(self, text) -> None:
         self.val_end_date = text
 
-    def keyPressEvent(self, event):
+    def keyPressEvent(self, event) -> None:
         if event.key() in (Qt.Key_Enter, Qt.Key_Return):
             self.button()
 
